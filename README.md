@@ -6,7 +6,7 @@
 
 📍 Based in Pittsburgh, PA | 💻 Open to collaboration, internships, and full-time roles in Data Science, ML Engineering, or Research.
 
-🔗 [LinkedIn] ([https://linkedin.com](https://www.linkedin.com/in/hyunseok-lee-545575238/))  
+🔗 [LinkedIn] ([https://www.linkedin.com/in/hyunseok-lee-545575238/](https://www.linkedin.com/in/hyunseok-lee-545575238/))  
 
 ---
 
