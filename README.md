@@ -1,6 +1,6 @@
 ## 👋 Hi, I'm Hyunseok Lee!
 
-🎓 Currently pursuing my Master’s degree in **Data Analytics for Science** at **Carnegie Mellon University**, with a strong foundation in Statistics and Computer Science from the **University of Minnesota**.
+🎓 Currently pursuing my Master’s degree in **Data Analytics for Science** at **Carnegie Mellon University**, with a strong foundation in Machine Learning, Deep Learning, AI, and Statistical Modeling.
 
 💡 I’m passionate about using **data science**, **machine learning**, and **Generative AI** to solve real-world problems across healthcare, IT, and Pharmacy domains.
 
