@@ -1,0 +1,261 @@
+---
+title: "Project 2"
+author: "Hyunseok Lee"
+date: "2024-10-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##  Data description
+```{r}
+df<- read.csv("C:/Users/Hyunseok/Downloads/stellar_temperature.csv")
+summary(df)
+colnames(df) # 12 columns include response variable
+nrow(df) # 10000 rows
+colSums(is.na(df)) # No NAs
+
+```
+There are 12 columns include response variable and the data shape is 10000 rows and 12 cols. There is no 'NA' values in all columns. 
+
+##  EDA
+```{r}
+# Outlier
+## Histogram
+suppressMessages(library(tidyverse))
+df %>% gather(.) -> df.eda
+ggplot(data = df.eda, mapping = aes(x=value)) +
+  geom_histogram(fill = "mediumorchid") +
+  facet_wrap(~key, scales = 'free') # parallax, br_col predictors look skewed
+# response variable looks normal distributed
+
+
+ggplot(data = df.eda, mapping = aes(x=value)) +
+  geom_boxplot(fill = "seagreen") +
+  facet_wrap(~key, scales = 'free')
+
+detectoutlier <- function(x) {
+  # Remove missing values
+  x <- x[!is.na(x)]
+  mean_val <- mean(x)
+  sd_val <- sd(x)
+  # Identify outliers based on z-scores ( 4 is way higher than normal)
+  abs(x - mean_val) > (4 * sd_val)
+}
+# Remove outliers
+removeoutlier <- function(dataframe, columns=names(dataframe)) {
+  for (col in columns) {
+    dataframe <- dataframe[!detectoutlier(dataframe[[col]]),]
+  }
+  dataframe
+}
+
+sum(detectoutlier(df$g_mag)=='TRUE')
+sum(detectoutlier(df$pmra)=='TRUE')
+sum(detectoutlier(df$parallax)=='TRUE')
+sum(detectoutlier(df$b_mag)=='TRUE')
+sum(detectoutlier(df$br_col)=='TRUE')
+sum(detectoutlier(df$dec_x)=='TRUE')
+sum(detectoutlier(df$pmdec)=='TRUE')
+sum(detectoutlier(df$r_mag)=='TRUE')
+
+df.new <- removeoutlier(df, c('g_mag', 'pmra', 'parallax','b_mag','br_col','dec_x','pmdec','r_mag'))
+nrow(df.new) # 354 rows were deleted
+
+# Correlation
+suppressMessages(library(corrplot))
+df.new %>% select(.,-teff) %>% cor(.) %>% corrplot(.,method = 'ellipse')
+# b_mag & g_mag % r_mag are highly correlated
+```
+Before we remove the outliers, I used ggplot to determine transformation of response variable. Since our response variable looks normal distribution, there is no transformation needed. I made outlier function based on z-score, and I used extreme high value which is sigma is 4. The 354 rows were deleted. For correlation plot, g_mag, b_mag, r_mag are highly correlated to other variable(s).
+
+##   Train & test set
+```{r}
+set.seed(600)
+
+s <- sample(nrow(df.new),round(0.8*nrow(df.new)))
+df.train<-df.new[s,]
+df.test<-df.new[-s,]
+
+```
+```
+Set training set as 80% and test set as 20% of whole dataset.(Included response variable)
+```
+
+##   Linear model
+```{r}
+m1 <- lm(teff~., data = df.train)
+summary(m1)
+# mean square error and root mean squared error : 
+
+teff.pred <- predict(m1,newdata=df.test)
+df.plot   <- data.frame("x"=df.test$teff,"y"=teff.pred)
+ggplot(data=df.plot,mapping=aes(x=x,y=y)) +
+  geom_point() + xlim(3000,9000) + ylim(3000,9000) +
+  geom_abline(intercept=0,slope=1,color="firebrick") +
+  xlab("Observed teff (Test Set)") +
+  ylab("Predicted teff (Test Set)") # looks ok
+
+mean((teff.pred-df.test$teff)^2)
+lm.mse<-mean((teff.pred-df.test$teff)^2)
+mean((teff.pred-df.test$teff))
+
+```
+Mean square error and root mean squared error : 213827, -5.2. It's hard to judge, but a value of 213827 suggests either a large error magnitude.
+MSEs are computed on the test-set data only. Note that the square root of this quantity is the average distance between the predicted 'teff' and the observed 'teff'.\  Adjusted R^2= 0.6553 implies that approximately 65.53% of the variability in dependent variable is explained by linear model. This result imply the other models will have better performance.    
+
+
+##  Residual plot
+```{r}
+df.plot   <- data.frame("x"=df.test$teff-teff.pred)
+ggplot(data=df.plot,mapping=aes(x=x)) +
+  geom_histogram(bins=25,fill="burlywood4",aes(y=after_stat(density)))
+
+shapiro.test(df.plot$x)$p.value
+# Since P-value is 2.253966e-37 < 0.05, so we reject the null hypothesis that the data are normally distributed.
+
+# Check Variance constant
+df.plot <- data.frame("x"=teff.pred,"y"=df.test$teff-teff.pred)
+ggplot(data=df.plot,mapping=aes(x=x,y=y)) +
+  geom_point(col="darkolivegreen") +
+  geom_hline(yintercept=0,col="brown1") +
+  xlab("Predicted Model Values") + ylab("Model Residuals")
+# Maybe No
+car::ncvTest(m1)
+# Since p-value is < 2.22e-16, we reject the null hypothesis that the variance is constant
+```
+Since residual plot's P-value is 2.253966e-37 < 0.05, so we reject the null hypothesis that the data are normally distributed. Also, a plot of the residuals versus the predicted test-set response values are not even around the regression line. + When we run ncv.Test(), p-value is < 2.22e-16, we reject the null hypothesis that the variance is constant. As a result, we need to transfrom our response variable.
+  
+##  Log- transformation on response variable 
+```{r}
+df.train$teff<-log10(df.train$teff) # Transform response variable
+df.test$teff<-log10(df.test$teff)
+
+# Linear model
+tm1 <- lm(teff~., data = df.train)
+summary(tm1)
+# mean square error and root mean squared error : 
+
+teff.pred <- predict(tm1,newdata=df.test)
+df.plot   <- data.frame("x"=df.test$teff,"y"=teff.pred)
+ggplot(data=df.plot,mapping=aes(x=x,y=y)) +
+  geom_point() + xlim(3.5,4) + ylim(3.5,4) +
+  geom_abline(intercept=0,slope=1,color="firebrick") +
+  xlab("Observed teff (Test Set)") +
+  ylab("Predicted teff (Test Set)") # looks ok
+
+mean((teff.pred-df.test$teff)^2)
+lm.mse<-mean((teff.pred-df.test$teff)^2)
+mean((teff.pred-df.test$teff))
+
+```
+Our MSE and root MSE are dramatically decreased by 0.001 and -0.0004 which mean our linear model perform better than before. Also our adjusted R^2 has increased to 0.6831.
+
+##  VIF
+```{r, error=TRUE}
+suppressMessages(library(car))
+vif(tm1) # Something aliased variables
+attributes(alias(tm1)$Complete)$dimnames[[1]] # br-col is the dependent variable
+vif(lm(teff~.-br_col, data = df.train)) # VIF without br_col columns
+# g_mag, b_mag, r_mag are the potentially problematic variables 
+```
+When we compute variance-inflation factor function it said there are aliased coefficient in the model which mean there are dependent variable in our predictors. So I defined our dependent variable by using attributes function and it gave 'br-col' predictor. After remove this predictor, our result shows that g_mag, b_mag, r_mag are the potentially problematic variable since it has high values in VIF. But we are gonna keep it.  
+
+##   Best subset model
+```{r}
+set.seed(600)
+suppressMessages(library(bestglm))
+df.new$teff <- log10(df.new$teff) # log-transformation on response variable
+
+w <- which(names(df.new)=="teff")
+y <- df.new[,w]
+df1 <- df.new[,-w]
+df1 <- data.frame(df.new,"y"=y)
+df1 %>% select(.,-teff) -> df1
+
+# Divide Train and Test set
+s <- sample(nrow(df1),round(0.8*nrow(df1)))
+df.train1 <- df1[s,]
+df.test1  <- df1[-s,]
+df.train1 <- subset(df.train1, select = -br_col)
+df.test1 <- subset(df.test1, select = -br_col)
+
+# BIC
+m_bic<- bestglm(df.train1, family = gaussian, IC = "BIC")
+m_bic$BestModel
+## 8 variables out of 10 
+
+# AIC
+m_aic <- bestglm(df.train1, family = gaussian, IC = "AIC")
+m_aic$BestModel
+## 9 variables out of 10
+
+summary(m_bic$BestModel) # R^2 =0.6831
+summary(m_aic$BestModel) # R^2 =0.6831
+summary(tm1) # R^2 = 0.6831
+```
+I expect the use of AIC to lead to the selection of a larger number of predictor variables. And the variables in the BIC model are not the part of the AIC model. Also no variable was dropped. But I more expect that g_mag, r_mag were dropped. When we compare R^2 values, variable selection here does not greatly affect prediction. The best subset linear models (AIC, BIC) are same as original model.
+
+##  PCA
+```{r}
+set.seed(600)
+pca.df <- df.new[,-1]
+
+pca.out <- prcomp(pca.df,scale=TRUE)
+v            <- pca.out$sdev^2
+pv           <- v/sum(v)
+pv.df        <- data.frame(1:length(pv),cumsum(pv))
+names(pv.df) <- c("pc","cumsum")
+ggplot(data=pv.df,mapping=aes(x=pc,y=cumsum)) +
+  geom_point(color="darkcyan") + 
+  geom_line(y=0.9, color = "darkred", linetype = 4) +
+  geom_line(color="darkcyan")
+# 7 PC explain 91~% of variance, so we choose 7 to compare.
+
+# PC Linear model MSE
+df.pc <- data.frame(pca.out$x, df.new$teff)
+names(df.pc) <- c("PC1","PC2","PC3","PC4","PC5","PC6","PC7","PC8","PC9","PC10","PC11", "y")
+m2 <- lm(y~PC1+PC2+PC3+PC4+PC5+PC6+PC7, data = df.pc, subset = s)
+m2.pred <- predict(m2, newdata = df.pc[-s,])
+mean((m2.pred-df.pc$y[-s])^2) # MSE for PCA linear regression(PC = 7)
+pca.mse<-mean((m2.pred-df.pc$y[-s])^2) 
+
+# BSS MSE
+resp.bic <- predict(m_bic$BestModel, newdata=df.test1)
+mean((resp.bic-df.test1$y)^2) # BIC MSE 
+bic.mse<-mean((resp.bic-df.test1$y)^2)
+
+resp.aic <- predict(m_aic$BestModel, newdata=df.test1)
+mean((df.test1$y-resp.aic)^2) # AIC MSE
+aic.mse<-mean((df.test1$y-resp.aic)^2) 
+
+# PC BSS MSE
+bg.out <- bestglm(df.pc,IC="BIC")
+pca.bic <- predict(bg.out$BestModel, newdata = df.pc[-s,])
+mean((df.pc[-s,]$y-pca.bic)^2) # BIC MSE 
+pcabic.mse<-mean((df.pc[-s,]$y-pca.bic)^2) 
+
+bg.out <- bestglm(df.pc,IC="AIC")
+pca.aic <- predict(bg.out$BestModel, newdata = df.pc[-s,])
+mean((df.pc[-s,]$y-pca.aic)^2) # AIC MSE 
+pcaaic.mse<-mean((df.pc[-s,]$y-pca.aic)^2)
+```
+7 PCs explain 91~% of total variance so I choose PC = 7.
+
+##  MSE comparison
+Now we have all MSEs, lets compare it.
+```{r}
+mse<-data.frame(c("Original linear model","BSS model(BIC)","BSS model(AIC)", "PCR linear model", "PCR BIC model", "PCR AIC model"),"MSE" )
+colnames(mse)<-c("Model", "MSE")
+mse[1,2] = lm.mse
+mse[2,2] = bic.mse
+mse[3,2] = aic.mse
+mse[4,2] = pca.mse
+mse[5,2] = pcabic.mse
+mse[6,2] = pcaaic.mse
+print(mse)
+```
+
+Comparing all MSEs, the best model has the lowest MSE. The PCA BSS(AIC, BIC) models are the best models.

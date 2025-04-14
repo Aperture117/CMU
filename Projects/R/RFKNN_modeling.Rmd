@@ -1,0 +1,202 @@
+---
+title: "Project 3"
+author: "Hyunseok Lee"
+date: "2024-11-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data EDA
+```{r}
+df <- read.csv("C:/Users/Hyunseok/Downloads/wineQuality.csv")
+summary(df) # all numerical values
+colnames(df) # 12 columns include response variable
+nrow(df) # 6497 rows
+colSums(is.na(df)) # No NA's
+```
+##  EDA
+```{r}
+suppressMessages(library(tidyverse))
+df %>% gather(key, value, -label) -> df.eda
+
+
+ggplot(data = df.eda, mapping = aes(x=value)) +
+  geom_histogram(fill = "mediumorchid") +
+  facet_wrap(~key, scales = 'free')
+
+# Chlorides, sulphates, sugar, free.sd and vol.acid are skewed.
+
+```
+##  Training and test set
+```{r}
+set.seed(600)
+
+s <- sample(nrow(df),round(0.8*nrow(df))) 
+# 20:80 train and test set ratio
+df.train<-df[s,]
+df.test<-df[-s,]
+```
+
+##  Logistic model 
+```{r}
+library(pROC)
+set.seed(600)
+df.train$label <- ifelse(df.train$label == "GOOD", 1, 0)
+df.test$label  <- ifelse(df.test$label == "GOOD", 1, 0)
+log.out   <- glm(label~.,data=df.train,family=binomial)
+
+# AUC curve
+resp.prob <- predict(log.out,newdata=df.test,type="response")
+(roc.log <- roc(df.test$label,resp.prob))
+plot(roc.log,col="red",xlim=c(1,0),ylim=c(0,1))
+
+cat("AUC for logistic regression: ",round(roc.log$auc,3),"\n") 
+glm.auc<-roc.log$auc
+# Youden's J statistic
+J <- roc.log$sensitivities + roc.log$specificities - 1
+w <- which.max(J)
+(threshold <- roc.log$thresholds[w])
+cat("Optimum threshold for logistic regression: ",round(roc.log$thresholds[w],3),"\n") 
+
+resp.pred <- ifelse(resp.prob>threshold,"GOOD","BAD")
+log.mcr  <- mean(resp.pred!=df.test$label)
+(tab      <- table(resp.pred,df.test$label))
+(glm.mcr<-(205+127)/(345+205+127+622)) # 25.56% MCR
+```
+##  Best-subset selection
+```{r}
+suppressMessages(library(bestglm))
+colnames(df.train)[12] <- "y" 
+colnames(df.test)[12] <- "y" 
+
+bg.bic <- bestglm(df.train,family=gaussian,IC="BIC")
+bg.bic$BestModel
+bg.aic <- bestglm(df.train,family=gaussian,IC="AIC")
+bg.aic$BestModel
+
+resp.bic <- predict(bg.bic$BestModel,newdata=df.test)
+mean((df.test$y-resp.bic)^2)
+
+resp.aic <- predict(bg.aic$BestModel,newdata=df.test)
+mean((df.test$y-resp.aic)^2)
+```
+AIC best subset model is slightly better than BIC best subset model.
+
+
+##  Random Forest
+```{r}
+set.seed(600)
+suppressMessages(library(randomForest))
+df.train$y <- factor(df.train$y)
+df.test$y <- factor(df.test$y)
+
+rf.out    <- randomForest(y~.,data=df.train,importance=TRUE)
+resp.pred <- predict(rf.out,newdata=df.test,type="prob")[,2]
+
+# ROC
+roc.rf <- suppressMessages(roc(df.test$y,resp.pred))
+plot(roc.rf,col="red",xlim=c(1,0),ylim=c(0,1))
+cat("AUC for random forest: ",roc.rf$auc,"\n")
+rf.auc <-roc.rf$auc
+# Youden's J
+J          <- roc.rf$sensitivities + roc.rf$specificities - 1
+w          <- which.max(J)
+(threshold.rf <- roc.rf$thresholds[w])
+
+pred.rf    <- ifelse(resp.pred>threshold.rf,"GOOD","BAD")
+(rf.table<-table(pred.rf,df.test$y))
+(rf.mcr<-(54+144)/(418+144+54+683)) # 15.55% MCR
+
+```
+##  Classfication tree
+```{r}
+library(rpart)
+rpart.out  <- rpart(y~.,data=df.train)
+resp.pred  <- predict(rpart.out,newdata=df.test,type="class")
+(rpart.mcr <- mean(resp.pred!=df.test$y))
+
+
+plotcp(rpart.out) # Need Pruned(?)
+
+rpart.pruned <- prune(rpart.out,cp=0.038)
+class.pred   <- predict(rpart.pruned,newdata=df.test,type="class")
+round(mean(class.pred!=df.test$y),4) # 26.25% MCR
+# Non-violence is apparently the only informative variable, in tree land.
+
+# ROC
+resp.pred <- predict(rpart.out,newdata=df.test,type="prob")[,2]
+roc.ct<- roc(df.test$y,resp.pred)
+plot(roc.ct,col="red",xlim=c(1,0),ylim=c(0,1))
+(ct.auc<-roc(df.test$y,resp.pred)$auc) # 0.7303
+
+# Youden's J
+J          <- roc.ct$sensitivities + roc.ct$specificities - 1
+w          <- which.max(J)
+(threshold <- roc.ct$thresholds[w])
+
+pred.ct    <- ifelse(resp.pred>threshold,"GOOD","BAD")
+table(pred.ct,df.test$y)
+(ct.mcr<-(159+182)/(290+159+182+668)) # 26.25% MCR 
+```
+##  K-NN
+```{r}
+library(FNN)
+# Choose optimal K
+k.max <- 30
+mcr.k <- rep(NA,k.max)
+for ( kk in 1:k.max ) {
+  knn.out <- knn.cv(train=df.train[,1:11],cl=df.train[,12],k=kk,algorithm="brute")
+  mcr.k[kk] <- mean(knn.out!=df.train$y)
+}
+k.min <- which.min(mcr.k)
+cat("The optimal number of nearest neighbors is ",k.min,"\n")
+
+# KNN
+knn.out <- knn(train=df.train[,1:11],test=df.test[,1:11],cl=df.train[,12],
+               k=k.min,algorithm="brute", prob = TRUE)
+
+mean(knn.out!=df.test$y)
+
+# ROC
+knn.prob <- attributes(knn.out)$prob
+w <- which(knn.out==0) # insert name of Class 0 here
+knn.prob[w] <- 1 - knn.prob[w]
+
+roc.knn<- roc(df.test$y,knn.prob)
+plot(roc.knn,col="red",xlim=c(1,0),ylim=c(0,1))
+(knn.auc<-roc(df.test$y,knn.prob)$auc) # 0.7374
+
+# Youden's J
+J          <- roc.knn$sensitivities + roc.knn$specificities - 1
+w          <- which.max(J)
+(threshold <- roc.knn$thresholds[w])
+
+pred.knn    <- ifelse(knn.prob>threshold,"GOOD","BAD")
+table(pred.knn,df.test$y)
+(knn.mcr<-(154+160)/(312+154+160+673)) # 24.17% MCR
+```
+##  Finalized result
+```{r}
+model<-c("Logistic", "Random Forest", "Classfication Tree", "K-NN")
+auc <- c(glm.auc, rf.auc, ct.auc, knn.auc)
+mcr <- c(glm.mcr, rf.mcr, ct.mcr, knn.mcr)
+(bestModel<- data.frame(model, auc, mcr))
+# our best model is Random Forest model
+
+# Best model optimal probability threshold and Confusion matrix
+threshold.rf
+rf.table
+
+
+# ROC curve
+plot(roc.log, col = "blue", main = "Comparing ROC curve by Model")
+plot(roc.rf, col ="red", add = TRUE)
+plot(roc.ct, col = "green", add = TRUE)
+plot(roc.knn, col = "brown", add = TRUE)
+legend("bottomright", legend = c("logistic", "randomForest", "ClassificationTree", "KNN"),
+       col = c("blue", "red", "green", "brown"), lwd = 2)
+```
+

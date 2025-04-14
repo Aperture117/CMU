@@ -1,0 +1,193 @@
+---
+title: "Project 1"
+author: "Hyunseok Lee"
+date: "2024-09-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#  Data preprocessing
+
+```{r, echo=FALSE}
+library(dplyr)
+suppressMessages(library(tidyverse))
+suppressMessages(library(corrplot))
+
+df <- read.csv("C:/Users/Hyunseok/Downloads/cmu-sleep.csv")
+```
+
+##  Dataframe
+```{r}
+ncol(df)
+nrow(df)
+names(df)
+str(df)
+```
+
+##  Factorize columns
+```{r}
+# Change demo series and study as factors since it only contains 0,1 or 2. 
+df$demo_race<-factor(df$demo_race)
+df$demo_gender <- factor(df$demo_gender)
+df$demo_firstgen <- factor(df$demo_firstgen)
+df$study <- factor(df$study)
+summary(df)
+
+```
+
+##  Delete and select cols and rows
+```{r}
+#Don't need uninformative cols
+df<-df %>% select(.,-subject_id, -cohort, -term_units)
+
+# Delete 'NA' rows
+colSums(is.na(df))
+df.new <- df %>% filter(!is.na(demo_race) & !is.na(demo_gender) & !is.na(demo_firstgen))
+
+# Delete firstgen == 2 outlier
+df.new <- df.new %>% filter(!(demo_firstgen == 2))
+
+dim(df.new)
+```
+```
+Since the 'subject_id only shows the unique ID of the subject and doesn't relevant to any other columns and response, we will delete this columns. Also, cohort is just present that exactly same values in 'study' columns so I exclude this for better understand. Last, each university counts units differently it doesn't really present same values when we compare with other study(cohort). Since we have Zterm_units_ZofZ which we already scaled term_units I exclude 'term_units' columns.
+Columns that contain 'NA's are demo_race, demo_gender, demo_firstgen. But the chart shows Term_units and Zterm_units_zofz also has 147 NA's but this is because study group 4 doesn't represent term_units and since I think this doesn't have huge effect on our dependent variables which is term_gpa I didn't exclude NA's. 
+In firstgen column, 2 is outlier so I exclude this row.
+```
+##  Outliers
+```{r, eval=FALSE}
+# Detect outliers
+detectoutlier <- function(x) {
+  # Remove missing values
+  x <- x[!is.na(x)]
+  mean_val <- mean(x)
+  sd_val <- sd(x)
+  # Identify outliers based on z-scores
+  abs(x - mean_val) > (3 * sd_val)
+}
+# Remove outliers
+removeoutlier <- function(dataframe, columns=names(dataframe)) {
+  for (col in columns) {
+    dataframe <- dataframe[!detectoutlier(dataframe[[col]]),]
+  }
+  print(dataframe)
+}
+# find how many outliers in each variable except target variable
+sum(detoutlier(df.new$bedtime_mssd)=='TRUE')
+sum(detoutlier(df.new$TotalSleepTime)=='TRUE')
+sum(detoutlier(df.new$midpoint_sleep)=='TRUE')
+sum(detoutlier(df.new$frac_nights_with_data)=='TRUE')
+sum(detoutlier(df.new$daytime_sleep)=='TRUE')
+sum(detoutlier(df.new$cum_gpa)=='TRUE')
+sum(detoutlier(df.new$Zterm_units_ZofZ)=='TRUE')
+
+# remove all outliers 
+df.new1 <- removeoutlier(df.new, c('bedtime_mssd','TotalSleepTime', 'midpoint_sleep', 'frac_nights_with_data', 'daytime_sleep', 'cum_gpa', 'Zterm_units_ZofZ'))
+
+
+```
+\n   Didn't include this 'outlier' code, but willing to include if needed.\n
+
+##  Plots
+```{r}
+#Quant plots
+df.new %>% select(.,-study, -demo_race, -demo_gender, -demo_firstgen) %>% gather(.) -> df.quant
+ggplot(data=df.quant,mapping=aes(x=value)) + 
+  geom_histogram(fill="mediumorchid") + 
+  facet_wrap(~key,scales='free')
+
+hist(log10(df.new$term_gpa),col="purple")#doesn't look symmetric, so let it go.
+
+# Cat plots
+df.new %>% select(., study, demo_race, demo_gender, demo_firstgen) %>% gather(.) -> df.cat
+ggplot(data=df.cat,mapping=aes(x=value)) + 
+  geom_bar(fill="skyblue") +
+  facet_wrap(~key,scales="free")
+
+```
+\n  In quantitative histogram both gpas are left skewed. Total and midpoint_sleep looks symmetric which mean is around 400. But bedtime_mssd, frac_nights_with_data, and daytime_sleep looks skewed either right or left. Especially in bedtime_mssd, most student's bedtime variability are 0 which mean most sleep time is equal. Last, Zterm_units_ZofZ are bell-shaped which mean most students in all other schools have similar units.  
+Since our response variable "term_gpa" has a little bit skewed, re-scaled log10 in term_gpa, but it isn't look symmetric. Let keep it as original one.
+For categorical variables, most of students are not non-firstgen and underrepresented in race. For gender, female group is slightly larger than male group, and for study variable, most school has similar student except "1" which is present Carnegie Mellon University SP18.
+
+##  Plot with response variable 
+  For better understanding I separate response variable and other categorical + quantitative variables.
+```{r}
+# Categorical variables
+ggplot(data=df.cat,mapping=aes(x=value,y=rep(df.new$term_gpa,4))) +
+  geom_boxplot(fill="seagreen") +
+  facet_wrap(~key,scales="free") +
+  ylab("term_gpa")
+```
+\n  The term_gpa looks similar for both gender, firstgen and race. In study plot, 4(Notre Dame University) clustered in high term_gpa compare with others. 5(CMU) has the highest variation. Most of schools has similar output in bedtime_mssd vs term_gpa but study 4 is well clustered.
+
+###  Total Sleep Time vs Term GPA by Gender
+```{r}
+ggplot(df.new, aes(x = TotalSleepTime, y = term_gpa, color = demo_gender)) + geom_point(size = 1) +
+ facet_wrap(~ demo_gender) + scale_color_manual(values = c('darkgreen', 'brown')) + 
+  labs(title = "Total Sleep Time X Term GPA by Gender")
+```
+\n  Both gender looks similiar totalsleeptime and term_gpa, but male group has some outliers with low term_gpa.
+ 
+###  Total Sleep Time vs Term GPA by study
+```{r}
+ggplot(df.new, aes(x = TotalSleepTime, y = term_gpa, color = study)) + geom_point(size = 1) +
+ facet_wrap(~ study) + scale_color_manual(values = c('darkgreen', 'brown','red', 'skyblue','yellow')) + 
+  labs(title = "Total Sleep Time X Term GPA by Study")
+```
+ \n  5 study looks similar with study "5" has high variance and "4" has low variance.
+
+###  Midtime sleep X Term GPA by study
+```{r}
+ggplot(df.new, aes(x = midpoint_sleep, y = term_gpa, color = study)) + geom_point(size = 1) +
+ facet_wrap(~ study) + scale_color_manual(values = c('darkgreen', 'brown','red', 'skyblue','yellow')) + 
+  labs(title = "midpoint_sleep X Term GPA by Study")
+```
+\n   Midtime_sleep looks very simliar with the totalsleep charts.
+ 
+###  Bedtime_mssd vs Term GPA by study
+```{r}
+ggplot(df.new, aes(x = bedtime_mssd, y = term_gpa, color = study)) + geom_point(size = 1) +
+ facet_wrap(~ study) + scale_color_manual(values = c('darkgreen', 'brown','red', 'skyblue','yellow')) + 
+  labs(title = "Bedtime_mssd X Term GPA by Study")
+```
+\n   Most students have similiar sleep time but there are some outliers in study "2,3,4".
+
+###  Quantitative variables
+```{r}
+df.new %>% select(.,-study, -demo_race, -demo_gender, -demo_firstgen, -term_gpa) %>% gather(.) %>% ggplot(.,mapping=aes(x=value,y=rep(df.new$term_gpa,7))) +
+  geom_point(col="darkblue") +
+  facet_wrap(~key,scales="free") +
+  ylab("term_gpa")
+
+
+```
+  For categorical variables (firstgen, race, gender, and study groups)  
+Most means are look similiar to others. but study groups are slightly different. 4(Notre Dame university) is the highest term_gpa compare with others.  
+For numerical variables  
+The scattle plots shows that the most student have lower bedtime variability with high term_gpa, higher cum_gpa has higher term_gpa. Most of student take 10-40 mins daytime sleep. Also, midtime_sleep and Totalsleeptime are shown that the most students take 300-500 and 350-450 mins of sleep. last, except all NA's,  the student’s load relative to the average amount of units(Zterm_units) are clustered in 0. 
+
+
+
+
+##  Correlation
+```{r}
+# correlation without all NA's
+# Without response variable
+df.new %>% select(.,-study, -demo_race, -demo_gender, -demo_firstgen, -term_gpa) %>% na.omit() %>% cor(.) %>% corrplot(.,method="ellipse")
+df.new %>% select(.,-study, -demo_race, -demo_gender, -demo_firstgen, -term_gpa) %>% na.omit() -> df.num
+cor(df.num)
+
+# With response variable
+df.new %>% select(.,-study, -demo_race, -demo_gender, -demo_firstgen) %>% na.omit() %>% cor(.) %>% corrplot(.,method="ellipse")
+df.new %>% select(.,-study, -demo_race, -demo_gender, -demo_firstgen) %>% na.omit() -> df.wterm
+cor(df.wterm)
+```
+
+  Without response variable correlation,
+Midpoint_sleep & bedtime_mssd are correlated(~0.47) but not highly correlated.
+With response variable correlation,
+Term_gpa and cum_gpa are correlated(~0.7) but not highly correlated.
+

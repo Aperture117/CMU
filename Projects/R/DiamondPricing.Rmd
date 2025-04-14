@@ -1,0 +1,400 @@
+---
+title: "Diamonds"
+author: "Kirpa Kaur, Chehak Arora, Sanika Gokakkar, Sahana Krishna Murthy, Hyunseok Lee, Jessica Ezemba"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Installing and loading the necesarry libraries
+
+```{r}
+# install.packages("tidyverse")
+# install.packages("caret")
+# install.packages("randomForest")
+```
+
+```{r}
+suppressMessages(library(tidyverse)) 
+suppressMessages(library(caret))    
+suppressMessages(library(randomForest))
+suppressMessages(library(pROC))
+```
+
+## Loading and Preprocessing the data
+
+
+```{r}
+diamonds <- read.csv("diamonds.csv")
+
+cat("Structure of the diamonds dataset:\n")
+str(diamonds)
+cat("\nFirst few rows of the dataset:\n")
+head(diamonds)
+```
+
+```{r}
+#converting the categorical data into factors
+diamonds$cut <- factor(diamonds$cut, levels = c("Fair", "Good", "Very Good", "Premium", "Ideal"))
+diamonds$color <- factor(diamonds$color, levels = c("J", "I", "H", "G", "F", "E", "D"))
+diamonds$clarity <- factor(diamonds$clarity, levels = c("I1", "SI1", "SI2", "VS1", "VS2", "VVS1", "VVS2", "IF"))
+
+# Apply log in Price
+diamonds$price <- log(diamonds$price)
+```
+
+```{r}
+cat("Number of missing values per column:\n")
+print(colSums(is.na(diamonds)))
+```
+
+```
+shows that there are no missing values
+```
+
+## Splitting data into test and training sets
+
+```{r}
+set.seed(123)  
+trainIndex <- createDataPartition(diamonds$price, p = 0.8, list = FALSE)
+trainData <- diamonds[trainIndex, ]
+testData <- diamonds[-trainIndex, ]
+
+cat("Training set size: ", nrow(trainData), "\n")
+cat("Test set size: ", nrow(testData), "\n")
+```
+### Starting first with linear methods
+## Linear Regression 
+
+```{r}
+# Training a linear regression model
+model_lr <- lm(price ~ carat + cut + color + clarity + x + y + z + table + depth, data = trainData)
+cat("Linear Regression Model Summary:\n")
+summary(model_lr)
+average_price <- mean(diamonds$price)
+cat("The average price of diamonds is:", average_price, "\n")
+```
+
+```{r}
+# predictions on the test set
+predictions <- predict(model_lr, newdata = testData)
+cat("Model Performance Metrics:\n")
+
+
+rmse <- sqrt(mean((predictions - testData$price)^2))
+cat("Root Mean Squared Error (RMSE): ", rmse, "\n")
+rsq <- cor(predictions, testData$price)^2
+cat("R-squared: ", rsq, "\n")
+
+# Plot actual vs predicted prices
+plot(predictions, testData$price, main = "Predicted vs Actual Prices", 
+     xlab = "Predicted Price", ylab = "Actual Price", col = "blue", pch = 16)
+abline(0, 1, col = "red")
+```
+
+## Random Forest 
+
+just trying
+
+```{r}
+# Training a Random Forest model 
+model_rf <- randomForest(price ~ carat + cut + color + clarity + x + y + z + table + depth, ntree= 100,
+                         data = trainData)
+
+# print(model_rf)
+cat("Random Forest Model Summary:\n")
+print(model_rf)
+cat("Feature Importance:\n")
+print(model_rf$importance)
+```
+
+Note: this is taking forever
+
+```{r}
+# Making predictions on the test set
+predictions <- predict(model_rf, newdata = testData)
+
+cat("First few predictions vs actual values:\n")
+comparison <- data.frame(Actual = testData$price, Predicted = predictions)
+print(head(comparison))
+
+# Calculating the performance metrics: RMSE, R-squared
+rmse_rf <- sqrt(mean((predictions - testData$price)^2))
+rsq <- cor(predictions, testData$price)^2
+
+cat("Root Mean Squared Error (RMSE):", rmse_rf, "\n")
+cat("R-squared:", rsq, "\n")
+```
+
+```{r}
+# Visualizing predictions vs actual values
+plot(predictions, testData$price, main = "Predicted vs Actual Prices", 
+     xlab = "Predicted Price", ylab = "Actual Price", col = "blue", pch = 16)
+abline(0, 1, col = "red")
+
+# Residual plot
+residuals <- predictions - testData$price
+plot(predictions, residuals, main = "Residuals Plot", 
+     xlab = "Predicted Price", ylab = "Residuals", col = "green", pch = 16)
+abline(h = 0, col = "red")
+```
+
+```{r}
+# QQ plot 
+qqnorm(residuals, main = "QQ Plot of Residuals")
+qqline(residuals, col = "red")
+
+#multicollinrarity 
+library(car)
+vif(model_lr) #vif >5 would indicate mullticollinearity
+
+```
+
+```{r}
+library(rpart)
+library(rpart.plot)
+# Train the decision tree model
+model_tree <- rpart(price ~ carat + cut + color + clarity + x + y + z + table + depth, 
+                    data = trainData, 
+                    method = "anova")
+
+# Summary of the decision tree model
+cat("Decision Tree Model Summary:\n")
+print(model_tree)
+rpart.plot(model_tree, type = 2, fallen.leaves = TRUE, main = "Decision Tree for Diamond Prices")
+```
+
+```{r}
+# Predictions
+predictions_tree <- predict(model_tree, newdata = testData)
+
+# Performance Metrics
+rmse_tree <- sqrt(mean((predictions_tree - testData$price)^2))
+rsq_tree <- cor(predictions_tree, testData$price)^2
+
+cat("Decision Tree RMSE:", rmse_tree, "\n")
+cat("Decision Tree R-squared:", rsq_tree, "\n")
+```
+Comparing it to average price, this is an okay model buut we could do better. 
+```{r}
+# install.packages("xgboost")
+library(xgboost)
+# Convert categorical variables to numeric
+trainData_xgb <- trainData %>%
+  mutate(across(where(is.factor), as.numeric))
+testData_xgb <- testData %>%
+  mutate(across(where(is.factor), as.numeric))
+
+# Prepare matrix format
+train_matrix <- as.matrix(trainData_xgb[, -which(names(trainData_xgb) == "price")])
+train_labels <- trainData_xgb$price
+test_matrix <- as.matrix(testData_xgb[, -which(names(testData_xgb) == "price")])
+test_labels <- testData_xgb$price
+
+# Train the model
+model_xgb <- xgboost(data = train_matrix, label = train_labels, 
+                     objective = "reg:squarederror", 
+                     nrounds = 100, verbose = 0)
+
+
+# Predictions
+predictions_xgb <- predict(model_xgb, newdata = test_matrix)
+
+# Performance Metrics
+rmse_xgb <- sqrt(mean((predictions_xgb - test_labels)^2))
+rsq_xgb <- cor(predictions_xgb, test_labels)^2
+
+cat("XGBoost RMSE:", rmse_xgb, "\n")
+cat("XGBoost R-squared:", rsq_xgb, "\n")
+```
+
+```{r}
+#log transformations
+model_lr_transformed <- lm(log(price) ~ carat + cut + color + clarity + x + y + z + table + depth, data = trainData)
+# Original distribution of price
+hist(trainData$price, main = "Original Price Distribution", xlab = "Price", col = "skyblue", border = "white")
+
+# Log-transformed distribution of price
+hist(log(trainData$price), main = "Log-Transformed Price Distribution", xlab = "Log(Price)", col = "skyblue", border = "white")
+
+
+```
+
+```{r}
+summary(model_lr) #predictors with p values > 0.05 can be removed. 
+
+```
+
+### Best subset model selection
+```{r}
+# Preprocessing
+testData_bss<- testData %>% rename("Y"="y")
+testData_bss<- testData_bss %>% rename("y"="price")
+trainData_bss<- trainData %>% rename("Y"="y")
+trainData_bss<- trainData_bss %>% rename("y"="price")
+
+library(bestglm)
+# BIC + BSS MSE
+bg.bic <- bestglm(trainData_bss, family = gaussian, IC="BIC")
+bg.bic$BestModel # selected variables : ccutGood, cutVery Good, cutPremium, cutIdeal, depth, x, Y
+resp.bic <- predict(bg.bic$BestModel, newdata = testData_bss)
+(rmse_bic<-sqrt(mean((testData_bss$y-resp.bic)^2))) # BIC RMSE
+  
+bg.aic <- bestglm(trainData_bss, family = gaussian, IC ="AIC")
+bg.aic$BestModel # selected variables : X, carat, cutGood ,cutVery Good ,cutPremium ,cutIdeal ,claritySI1,claritySI2    clarityVS1    clarityVS2   clarityVVS1   clarityVVS2     clarityIF, depth, x, Y
+resp.aic <- predict(bg.aic$BestModel, newdata = testData_bss)
+(rmse_aic<-sqrt(mean((testData_bss$y-resp.aic)^2))) # AIC RMSE
+
+plot(resp.bic, testData_bss$y, main = "BIC_Predicted vs Actual Values",
+     xlab = "Actual Price", ylab = "Predicted Price", col = "darkseagreen", pch = 16)
+abline(0, 1, col = "red")
+plot(resp.aic, testData_bss$y, main = "AIC_Predicted vs Actual Values",
+     xlab = "Actual Price", ylab = "Predicted Price", col = "darkseagreen1", pch = 16)
+abline(0, 1, col = "red")
+```
+
+Forward and Backward Stepwise Selection
+```{r}
+# Forward Stepwise Selection
+stepwise_model <- step(lm(price ~ 1, data = trainData), 
+                       scope = ~ carat + cut + color + clarity + x + y + z + table + depth,
+                       direction = "both")
+
+cat("Stepwise Model Summary:\n")
+summary(stepwise_model)
+```
+```{r}
+# Predictions from the selected stepwise model
+predictions_best <- predict(stepwise_model, newdata = testData)
+
+# Plot the predicted vs. actual values
+plot(testData$price, predictions_best, main = "Predicted vs Actual Values",
+     xlab = "Actual Price", ylab = "Predicted Price", col = "blue", pch = 16)
+abline(0, 1, col = "red")  # Add a 45-degree line for comparison
+```
+
+```{r}
+# MSE for the stepwise model
+mse_stepwise <- mean((predictions_best - testData$price)^2)
+print(mse_stepwise)
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_stepwise <- sqrt(mse_stepwise)
+print(paste("RMSE for the stepwise model:", round(rmse_stepwise, 2)))
+```
+### Model Comparison
+```{r}
+model_names <- c("Linear regression", "RandomForest", "Decison Tree", "XGBoost", "StepwiseSelection")
+rmse_values <- c(rmse, rmse_rf, rmse_tree, rmse_xgb,rmse_stepwise)
+model_performance <- data.frame(
+  Model = model_names,
+  Test_RMSE = rmse_values
+)
+print(model_performance)
+
+# Print best model
+best_model <- model_performance[which.min(model_performance$Test_RMSE), ]
+cat("Best model is ", best_model$Model, "and test MSE is ", best_model$Test_RMSE,"\n")
+
+# Plot
+ggplot(model_performance, aes(x = Model, y = Test_RMSE, fill = Model)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Test RMSE by Model",
+       x = "Model",
+       y = "Test RMSE") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1) 
+  )
+```
+Diagnostic Plot for Best Model
+```{r}
+# Predictions from the best model
+if (best_model_name == "XGBoost") {
+  # Special case for xgboost (matrix format required)
+  predictions_best <- predict(best_model_object, newdata = test_matrix)
+} else {
+  predictions_best <- predict(best_model_object, newdata = testData)
+}
+
+
+# Diagnostic Plot
+plot(testData$price, predictions_best, main = "Predicted vs Actual Values",
+     xlab = "Actual Price", ylab = "Predicted Price", col = "blue", pch = 16)
+abline(0, 1, col = "red")  # Add a 45-degree line for comparison
+```
+
+```{r}
+
+# Convert price into a binary classification high vs. low price
+median_price <- median(diamonds$price)
+trainData$price_bin <- ifelse(trainData$price > median(trainData$price), 1, 0)
+testData$price_bin <- ifelse(testData$price > median(testData$price), 1, 0)
+
+# Re-train models 
+# Random Forest
+
+model_rf_bin <- randomForest(price_bin ~ carat + cut + color + clarity + x + y + z + table + depth, 
+                             data = trainData, 
+                             ntree = 100)
+pred_probs <- predict(model_rf_bin, newdata = testData, type = "prob")
+```
+
+```{r}
+# Decision Tree for binary classification
+model_tree_bin <- rpart(price_bin ~ carat + cut + color + clarity + x + y + z + table + depth, 
+                        data = trainData, method = "class")
+pred_tree <- predict(model_tree_bin, newdata = testData, type = "prob")[, 2]
+```
+
+```{r}
+# XGBoost for binary classification
+model_xgb_bin <- xgboost(data = train_matrix, label = trainData$price_binary, 
+                         objective = "binary:logistic", nrounds = 100, verbose = 0)
+pred_xgb <- predict(model_xgb_bin, newdata = test_matrix)
+```
+
+```{r}
+# Best Subset Selection (BIC)
+model_bic_bin <- glm(price_bin ~ carat + cutGood + cutVeryGood + cutPremium + cutIdeal + depth + x + Y, 
+                     data = trainData, family = binomial)
+pred_bic <- predict(model_bic_bin, newdata = testData, type = "response")
+```
+
+```{r}
+# Best Subset Selection (AIC)
+model_aic_bin <- glm(price_bin ~ carat + cut + clarity + depth + x + Y, 
+                     data = trainData, family = binomial)
+pred_aic <- predict(model_aic_bin, newdata = testData, type = "response")
+```
+
+```{r}
+# Stepwise Selection Model
+stepwise_model_bin <- step(glm(price_bin ~ 1, data = trainData, family = binomial),
+                           scope = ~ carat + cut + color + clarity + x + y + z + table + depth,
+                           direction = "both")
+pred_stepwise <- predict(stepwise_model_bin, newdata = testData, type = "response")
+```
+
+```{r}
+# ROC Curve Analysis
+roc_rf <- roc(testData$price_binary, pred_rf)
+roc_tree <- roc(testData$price_binary, pred_tree)
+roc_xgb <- roc(testData$price_binary, pred_xgb)
+roc_bic <- roc(testData$price_binary, pred_bic)
+roc_aic <- roc(testData$price_binary, pred_aic)
+roc_stepwise <- roc(testData$price_binary, pred_stepwise)
+
+# Plot ROC Curves
+plot(roc_rf, col = "green", lwd = 2, main = "ROC Curves for Models")
+plot(roc_tree, col = "orange", lwd = 2, add = TRUE)
+plot(roc_xgb, col = "red", lwd = 2, add = TRUE)
+plot(roc_bic, col = "blue", lwd = 2, add = TRUE)
+plot(roc_aic, col = "purple", lwd = 2, add = TRUE)
+plot(roc_stepwise, col = "brown", lwd = 2, add = TRUE)
+
+legend("bottomright", legend = c("Random Forest", "Decision Tree", "XGBoost", 
+                                 "Best Subset (BIC)", "Best Subset (AIC)", "Stepwise"),
+       col = c("green", "orange", "red", "blue", "purple", "brown"), lwd = 2)
